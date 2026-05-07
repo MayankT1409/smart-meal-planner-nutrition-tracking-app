@@ -28,3 +28,33 @@ class MealEntriesNotifier extends StateNotifier<List<MealEntry>> {
 final nutritionGoalProvider = StateProvider<NutritionGoal?>((ref) {
   return ref.watch(localRepositoryProvider).getNutritionGoal();
 });
+
+final dailyTotalsProvider = Provider<Map<String, double>>((ref) {
+  final entries = ref.watch(mealEntriesProvider);
+  final today = DateTime.now();
+  
+  final todayEntries = entries.where((e) => 
+    e.dateTime.year == today.year && 
+    e.dateTime.month == today.month && 
+    e.dateTime.day == today.day
+  );
+
+  double totalCals = 0;
+  double totalProtein = 0;
+  double totalCarbs = 0;
+  double totalFats = 0;
+
+  for (var entry in todayEntries) {
+    totalCals += entry.calories;
+    totalProtein += entry.protein;
+    totalCarbs += entry.carbs;
+    totalFats += entry.fats;
+  }
+
+  return {
+    'calories': totalCals,
+    'protein': totalProtein,
+    'carbs': totalCarbs,
+    'fats': totalFats,
+  };
+});

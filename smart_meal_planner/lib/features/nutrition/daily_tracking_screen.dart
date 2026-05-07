@@ -1,48 +1,91 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/storage_providers.dart';
 
-class DailyTrackingScreen extends StatelessWidget {
+class DailyTrackingScreen extends ConsumerWidget {
   const DailyTrackingScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final totals = ref.watch(dailyTotalsProvider);
+    final goal = ref.watch(nutritionGoalProvider);
+    
+    // Default goal if none set
+    final targetCals = goal?.targetCalories ?? 2000;
+    final targetProtein = goal?.targetProtein ?? 150;
+    final targetCarbs = goal?.targetCarbs ?? 200;
+    final targetFats = goal?.targetFats ?? 70;
+
+    final double caloriesRemaining = targetCals - totals['calories']!;
+    final double calorieProgress = (totals['calories']! / targetCals).clamp(0.0, 1.0);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Daily Tracking'),
+        title: const Text('Daily Dashboard'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildProgressSection(context),
-            const SizedBox(height: 24),
+            _buildMainProgress(context, totals['calories']!, targetCals, calorieProgress),
+            const SizedBox(height: 32),
             const Text(
-              'Nutrients Breakout',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              'Nutrient Breakdown',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            _buildNutrientCard(
+              context,
+              'Protein',
+              totals['protein']!,
+              targetProtein,
+              Colors.blue,
+              Icons.bolt,
             ),
             const SizedBox(height: 12),
-            _buildNutrientRow(context, 'Protein', '80g / 120g', 0.65, Colors.blue),
-            _buildNutrientRow(context, 'Carbs', '150g / 250g', 0.6, Colors.orange),
-            _buildNutrientRow(context, 'Fats', '45g / 70g', 0.64, Colors.green),
-            const SizedBox(height: 24),
-            const Text(
-              'Water Intake',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            _buildNutrientCard(
+              context,
+              'Carbs',
+              totals['carbs']!,
+              targetCarbs,
+              Colors.orange,
+              Icons.grain,
             ),
             const SizedBox(height: 12),
-            _buildWaterTracker(context),
+            _buildNutrientCard(
+              context,
+              'Fats',
+              totals['fats']!,
+              targetFats,
+              Colors.green,
+              Icons.water_drop,
+            ),
+            const SizedBox(height: 32),
+            _buildRemainingSection(context, caloriesRemaining),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProgressSection(BuildContext context) {
+  Widget _buildMainProgress(BuildContext context, double current, double target, double progress) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary,
-        borderRadius: BorderRadius.circular(24),
+        gradient: LinearGradient(
+          colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primary.withOpacity(0.8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -51,85 +94,130 @@ class DailyTrackingScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Calories Remaining',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                  'Daily Calories',
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
                 ),
-                const Text(
-                  '1,250 kcal',
-                  style: TextStyle(
+                const SizedBox(height: 8),
+                Text(
+                  '${current.toInt()} / ${target.toInt()}',
+                  style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 28,
+                    fontSize: 26,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Goal: 2,500 kcal',
-                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                const SizedBox(height: 4),
+                Text(
+                  'kcal consumed',
+                  style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14),
                 ),
               ],
             ),
           ),
-          SizedBox(
-            height: 80,
-            width: 80,
-            child: CircularProgressIndicator(
-              value: 0.5,
-              strokeWidth: 10,
-              backgroundColor: Colors.white24,
-              color: Colors.white,
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                height: 90,
+                width: 90,
+                child: CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 10,
+                  backgroundColor: Colors.white24,
+                  color: Colors.white,
+                  strokeCap: StrokeCap.round,
+                ),
+              ),
+              Text(
+                '${(progress * 100).toInt()}%',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNutrientCard(
+    BuildContext context,
+    String label,
+    double current,
+    double target,
+    Color color,
+    IconData icon,
+  ) {
+    final progress = (current / target).clamp(0.0, 1.0);
+    return Card(
+      elevation: 0,
+      color: color.withOpacity(0.05),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: color.withOpacity(0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const Spacer(),
+                Text(
+                  '${current.toInt()}g / ${target.toInt()}g',
+                  style: TextStyle(color: Colors.grey[700], fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 10,
+                backgroundColor: color.withOpacity(0.1),
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRemainingSection(BuildContext context, double remaining) {
+    final bool isOver = remaining < 0;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isOver ? Colors.red[50] : Colors.grey[100],
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        children: [
+          Text(
+            isOver ? 'Calories Over Limit' : 'Calories Remaining',
+            style: TextStyle(
+              color: isOver ? Colors.red : Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${remaining.abs().toInt()} kcal',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: isOver ? Colors.red : Colors.black87,
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildNutrientRow(
-    BuildContext context,
-    String label,
-    String value,
-    double progress,
-    Color color,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label),
-              Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: progress,
-            backgroundColor: color.withOpacity(0.1),
-            color: color,
-            borderRadius: BorderRadius.circular(4),
-            minHeight: 8,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWaterTracker(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(8, (index) {
-            final isFilled = index < 4;
-            return Icon(
-              Icons.local_drink,
-              color: isFilled ? Colors.blue : Colors.grey[300],
-            );
-          }),
-        ),
       ),
     );
   }
