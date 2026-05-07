@@ -24,6 +24,7 @@ class HiveService {
     await Hive.openBox<MealEntry>(mealBoxName);
     await Hive.openBox<NutritionGoal>(goalBoxName);
     await Hive.openBox<DailyNutritionSummary>(summaryBoxName);
+    await Hive.openBox('sync_queue');
   }
 
   // Generic CRUD helpers

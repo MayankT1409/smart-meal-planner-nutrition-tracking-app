@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../services/local_repository.dart';
 import '../models/meal_entry.dart';
 import '../models/nutrition_goal.dart';
@@ -68,4 +69,28 @@ final dailyTotalsProvider = Provider<Map<String, double>>((ref) {
     'carbs': totalCarbs,
     'fats': totalFats,
   };
+});
+
+final weeklyAnalyticsProvider = Provider<List<Map<String, dynamic>>>((ref) {
+  final entries = ref.watch(mealEntriesProvider);
+  final now = DateTime.now();
+  
+  return List.generate(7, (index) {
+    final date = now.subtract(Duration(days: 6 - index));
+    final dayEntries = entries.where((e) => 
+      e.dateTime.year == date.year && 
+      e.dateTime.month == date.month && 
+      e.dateTime.day == date.day
+    );
+
+    double totalCals = 0;
+    for (var entry in dayEntries) {
+      totalCals += entry.calories;
+    }
+
+    return {
+      'day': DateFormat('E').format(date),
+      'calories': totalCals,
+    };
+  });
 });

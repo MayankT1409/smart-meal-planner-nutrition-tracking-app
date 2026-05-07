@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/meal_entry.dart';
 import '../../providers/storage_providers.dart';
+import '../../services/offline_sync_service.dart';
 
 class AddMealScreen extends ConsumerStatefulWidget {
   final MealEntry? mealToEdit;
@@ -23,6 +24,7 @@ class _AddMealScreenState extends ConsumerState<AddMealScreen> {
   late TextEditingController _fatsController;
   late TextEditingController _quantityController;
   
+  bool _isLoading = false;
   String _selectedMealType = 'Breakfast';
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
@@ -56,7 +58,11 @@ class _AddMealScreenState extends ConsumerState<AddMealScreen> {
   }
 
   Future<void> _saveMeal() async {
-    if (_formKey.currentState!.validate()) {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
       final combinedDateTime = DateTime(
         _selectedDate.year,
         _selectedDate.month,
@@ -71,17 +77,15 @@ class _AddMealScreenState extends ConsumerState<AddMealScreen> {
         foodName: _nameController.text,
         quantity: double.parse(_quantityController.text),
         calories: double.parse(_caloriesController.text),
-        protein: double.parse(_proteinController.text),
-        carbs: double.parse(_carbsController.text),
-        fats: double.parse(_fatsController.text),
+        protein: double.tryParse(_proteinController.text) ?? 0,
+        carbs: double.tryParse(_carbsController.text) ?? 0,
+        fats: double.tryParse(_fatsController.text) ?? 0,
         dateTime: combinedDateTime,
       );
 
       final notifier = ref.read(mealEntriesProvider.notifier);
       
       if (widget.mealToEdit != null) {
-        // For simplicity in this starter, we find the index and update
-        // In a real app, you might use a more robust update method
         final entries = ref.read(mealEntriesProvider);
         final index = entries.indexWhere((e) => e.id == widget.mealToEdit!.id);
         if (index != -1) {
@@ -92,12 +96,27 @@ class _AddMealScreenState extends ConsumerState<AddMealScreen> {
         await notifier.addEntry(mealEntry);
       }
 
+      // Offline-First Logic: Queue for cloud sync
+      await OfflineSyncService.queueMealSync(mealEntry);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(widget.mealToEdit != null ? 'Meal Updated' : 'Meal Added')),
+          SnackBar(
+            content: Text(widget.mealToEdit != null ? 'Meal Updated' : 'Meal Added Successfully'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
         Navigator.pop(context);
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving meal: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -105,106 +124,156 @@ class _AddMealScreenState extends ConsumerState<AddMealScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.mealToEdit != null ? 'Edit Meal' : 'Add Meal'),
+        title: Text(widget.mealToEdit != null ? 'Edit Meal' : 'Add New Meal'),
       ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            DropdownButtonFormField<String>(
-              value: _selectedMealType,
-              decoration: const InputDecoration(labelText: 'Meal Type'),
-              items: ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
-                  .map((type) => DropdownMenuItem(value: type, child: Text(type)))
-                  .toList(),
-              onChanged: (val) => setState(() => _selectedMealType = val!),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Food Name', hintText: 'e.g. Chicken Salad'),
-              validator: (val) => val!.isEmpty ? 'Please enter food name' : null,
-            ),
-            const SizedBox(height: 16),
-            Row(
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(24),
               children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _caloriesController,
-                    decoration: const InputDecoration(labelText: 'Calories', suffixText: 'kcal'),
-                    keyboardType: TextInputType.number,
-                    validator: (val) => val!.isEmpty ? 'Required' : null,
-                  ),
+                _buildCardSection(
+                  title: 'Basic Information',
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: _selectedMealType,
+                      decoration: const InputDecoration(labelText: 'Meal Category'),
+                      items: ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
+                          .map((type) => DropdownMenuItem(value: type, child: Text(type)))
+                          .toList(),
+                      onChanged: (val) => setState(() => _selectedMealType = val!),
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'What did you eat?',
+                        hintText: 'e.g. Scrambled Eggs',
+                        prefixIcon: Icon(Icons.restaurant),
+                      ),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Please enter a food name';
+                        if (val.length < 2) return 'Name too short';
+                        return null;
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _quantityController,
-                    decoration: const InputDecoration(labelText: 'Quantity'),
-                    keyboardType: TextInputType.number,
-                  ),
+                const SizedBox(height: 20),
+                _buildCardSection(
+                  title: 'Nutrition Details',
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _caloriesController,
+                            decoration: const InputDecoration(labelText: 'Calories', suffixText: 'kcal'),
+                            keyboardType: TextInputType.number,
+                            validator: (val) {
+                              if (val == null || val.isEmpty) return 'Required';
+                              final n = double.tryParse(val);
+                              if (n == null || n < 0) return 'Invalid';
+                              if (n > 5000) return 'Too high?';
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _quantityController,
+                            decoration: const InputDecoration(labelText: 'Quantity', suffixText: 'serv'),
+                            keyboardType: TextInputType.number,
+                            validator: (val) {
+                              if (val == null || val.isEmpty) return 'Required';
+                              final n = double.tryParse(val);
+                              if (n == null || n <= 0) return 'Must be > 0';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Macronutrients (Optional)', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _buildMacroField(_proteinController, 'Protein', Colors.blue),
+                        const SizedBox(width: 8),
+                        _buildMacroField(_carbsController, 'Carbs', Colors.orange),
+                        const SizedBox(width: 8),
+                        _buildMacroField(_fatsController, 'Fats', Colors.green),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _buildCardSection(
+                  title: 'Time & Date',
+                  children: [
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Schedule Date'),
+                      subtitle: Text(DateFormat('EEEE, MMM d, yyyy').format(_selectedDate)),
+                      trailing: const Icon(Icons.calendar_month),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDate,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked != null) setState(() => _selectedDate = picked);
+                      },
+                    ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Logged Time'),
+                      subtitle: Text(_selectedTime.format(context)),
+                      trailing: const Icon(Icons.access_time),
+                      onTap: () async {
+                        final picked = await showTimePicker(
+                          context: context,
+                          initialTime: _selectedTime,
+                        );
+                        if (picked != null) setState(() => _selectedTime = picked);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 40),
+                ElevatedButton(
+                  onPressed: _saveMeal,
+                  child: Text(widget.mealToEdit != null ? 'Apply Changes' : 'Confirm & Save'),
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            const Text('Macros', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _buildMacroField(_proteinController, 'Protein', 'g'),
-                const SizedBox(width: 8),
-                _buildMacroField(_carbsController, 'Carbs', 'g'),
-                const SizedBox(width: 8),
-                _buildMacroField(_fatsController, 'Fats', 'g'),
-              ],
-            ),
-            const SizedBox(height: 24),
-            ListTile(
-              title: const Text('Date'),
-              subtitle: Text(DateFormat('yyyy-MM-dd').format(_selectedDate)),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _selectedDate,
-                  firstDate: DateTime(2000),
-                  lastDate: DateTime(2100),
-                );
-                if (picked != null) setState(() => _selectedDate = picked);
-              },
-            ),
-            ListTile(
-              title: const Text('Time'),
-              subtitle: Text(_selectedTime.format(context)),
-              trailing: const Icon(Icons.access_time),
-              onTap: () async {
-                final picked = await showTimePicker(
-                  context: context,
-                  initialTime: _selectedTime,
-                );
-                if (picked != null) setState(() => _selectedTime = picked);
-              },
-            ),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: _saveMeal,
-              child: Text(widget.mealToEdit != null ? 'Update Meal' : 'Save Meal'),
-            ),
-          ],
-        ),
-      ),
+          ),
     );
   }
 
-  Widget _buildMacroField(TextEditingController controller, String label, String unit) {
+  Widget _buildCardSection({required String title, required List<Widget> children}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey)),
+        const SizedBox(height: 8),
+        ...children,
+      ],
+    );
+  }
+
+  Widget _buildMacroField(TextEditingController controller, String label, Color color) {
     return Expanded(
       child: TextFormField(
         controller: controller,
         decoration: InputDecoration(
           labelText: label,
-          suffixText: unit,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          hintText: '0',
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
         ),
         keyboardType: TextInputType.number,
       ),
