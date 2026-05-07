@@ -1,27 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
+import '../meals/add_meal_screen.dart';
+import '../../providers/storage_providers.dart';
+import '../../models/meal_entry.dart';
+import '../../services/offline_sync_service.dart';
 
-class FoodEntryScreen extends StatelessWidget {
+class FoodEntryScreen extends ConsumerWidget {
   const FoodEntryScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recentEntries = ref.watch(mealEntriesProvider).reversed.take(5).toList();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add Food'),
+        title: const Text('Quick Add'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              decoration: InputDecoration(
-                hintText: 'Search food...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.qr_code_scanner),
-                  onPressed: () {},
-                ),
-              ),
+            const Text(
+              'Log your meal in seconds',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 24),
             Row(
@@ -45,72 +48,120 @@ class FoodEntryScreen extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Recent Entries',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+            const SizedBox(height: 32),
+            const Text(
+              'One-Tap Re-Add',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
             ),
             const SizedBox(height: 12),
-            _buildRecentItem(context, 'Greek Yogurt', '150 kcal', 'Breakfast'),
-            _buildRecentItem(context, 'Almonds (30g)', '170 kcal', 'Snack'),
-            _buildRecentItem(context, 'Coffee with Milk', '45 kcal', 'Breakfast'),
+            if (recentEntries.isEmpty)
+              _buildEmptyState(context)
+            else
+              ...recentEntries.map((meal) => _buildQuickAddCard(context, ref, meal)),
           ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AddMealScreen()),
+          );
+        },
+        icon: const Icon(Icons.add),
+        label: const Text('Add Custom Meal'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
       ),
     );
   }
 
-  Widget _buildQuickAction(
-    BuildContext context,
-    String label,
-    IconData icon,
-    Color color,
-  ) {
+  Widget _buildEmptyState(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
+      width: double.infinity,
+      padding: const EdgeInsets.all(40),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.2)),
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey[200]!),
       ),
-      child: Column(
+      child: const Column(
         children: [
-          Icon(icon, color: color, size: 32),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Icon(Icons.history, size: 48, color: Colors.grey),
+          SizedBox(height: 16),
+          Text('No recent meals found.', style: TextStyle(color: Colors.grey)),
         ],
       ),
     );
   }
 
-  Widget _buildRecentItem(
-    BuildContext context,
-    String name,
-    String calories,
-    String category,
-  ) {
+  Widget _buildQuickAddCard(BuildContext context, WidgetRef ref, MealEntry meal) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey.withOpacity(0.1)),
+      ),
       child: ListTile(
-        title: Text(name),
-        subtitle: Text(category),
-        trailing: Text(
-          calories,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.primary,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        title: Text(meal.foodName, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('Quick-add as ${meal.mealType}'),
+        trailing: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+            shape: BoxShape.circle,
           ),
+          child: Icon(Icons.add, color: Theme.of(context).colorScheme.primary),
         ),
-        onTap: () {},
+        onTap: () async {
+          // CLONE AND ADD IMMEDIATELY
+          final newEntry = MealEntry(
+            id: const Uuid().v4(),
+            mealType: meal.mealType,
+            foodName: meal.foodName,
+            quantity: meal.quantity,
+            calories: meal.calories,
+            protein: meal.protein,
+            carbs: meal.carbs,
+            fats: meal.fats,
+            dateTime: DateTime.now(), // Use current time
+          );
+
+          await ref.read(mealEntriesProvider.notifier).addEntry(newEntry);
+          
+          // Sync to Firebase in background
+          OfflineSyncService.queueMealSync(newEntry).catchError((_) {});
+
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Quickly Added: ${meal.foodName}'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 1),
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildQuickAction(BuildContext context, String label, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.1)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 36),
+          const SizedBox(height: 12),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+        ],
       ),
     );
   }

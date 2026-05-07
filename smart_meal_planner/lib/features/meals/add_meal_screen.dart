@@ -96,13 +96,16 @@ class _AddMealScreenState extends ConsumerState<AddMealScreen> {
         await notifier.addEntry(mealEntry);
       }
 
-      // Offline-First Logic: Queue for cloud sync
-      await OfflineSyncService.queueMealSync(mealEntry);
+      // Local save is successful, now attempt background sync
+      // We don't await this so it doesn't block the UI or show errors if Firebase fails
+      OfflineSyncService.queueMealSync(mealEntry).catchError((e) {
+        debugPrint('Background sync failed (will retry): $e');
+      });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(widget.mealToEdit != null ? 'Meal Updated' : 'Meal Added Successfully'),
+          const SnackBar(
+            content: Text('Meal Logged Successfully'),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
