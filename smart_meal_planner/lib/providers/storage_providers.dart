@@ -25,9 +25,20 @@ class MealEntriesNotifier extends StateNotifier<List<MealEntry>> {
   }
 }
 
-final nutritionGoalProvider = StateProvider<NutritionGoal?>((ref) {
-  return ref.watch(localRepositoryProvider).getNutritionGoal();
+final nutritionGoalProvider = StateNotifierProvider<GoalNotifier, NutritionGoal?>((ref) {
+  return GoalNotifier(ref.watch(localRepositoryProvider));
 });
+
+class GoalNotifier extends StateNotifier<NutritionGoal?> {
+  final LocalRepository _repo;
+
+  GoalNotifier(this._repo) : super(_repo.getNutritionGoal());
+
+  Future<void> updateGoal(NutritionGoal goal) async {
+    await _repo.updateNutritionGoal(goal);
+    state = goal;
+  }
+}
 
 final dailyTotalsProvider = Provider<Map<String, double>>((ref) {
   final entries = ref.watch(mealEntriesProvider);

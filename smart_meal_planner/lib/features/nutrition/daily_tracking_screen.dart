@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/storage_providers.dart';
+import '../goals/goal_setting_screen.dart';
 
 class DailyTrackingScreen extends ConsumerWidget {
   const DailyTrackingScreen({super.key});
@@ -22,6 +23,17 @@ class DailyTrackingScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Daily Dashboard'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const GoalSettingScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
